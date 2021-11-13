@@ -254,7 +254,7 @@ library Math {
     }
 }
 
-contract FightTokenVesting is Context {
+contract LinearFightTokenVesting is Context {
     event FightReleased(address token, uint256 amount);
 
     mapping(address => uint256) private _erc20Released;

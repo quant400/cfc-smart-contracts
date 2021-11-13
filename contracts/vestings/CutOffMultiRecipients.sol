@@ -224,11 +224,12 @@ contract FightTokenVesting {
         uint percent;
     }
 
-    ReleasePoint[] private releasePoints;
-    Recipient[] private recipients;
+    ReleasePoint[] public releasePoints;
+    Recipient[] public recipients;
+
     uint public totalReleases;
     IERC20 public fight;
-    uint public divisionFactor = 1000;
+    uint public divisionFactor = 1000; // please change it accordingly
 
     constructor(
         address _fight,
@@ -240,14 +241,20 @@ contract FightTokenVesting {
         require(_times.length == _amounts.length, "Release Points format incorrect");
         require(_recipients.length == _percents.length, "Recipient format incorrect");
         for (uint i = 0; i < _times.length; i++) {
-            releasePoints[i] = ReleasePoint(_times[i], _amounts[i], false);
+            releasePoints.push(ReleasePoint({
+                time: _times[i],
+                amount: _amounts[i],
+                hasReleased: false
+            }));
         }
-
         totalReleases = releasePoints.length;
 
         uint totalPercent = 0;
-        for (uint i = 0; i < _times.length; i++) {
-            recipients[i] = Recipient(_recipients[i], _percents[i]);
+        for (uint i = 0; i < _recipients.length; i++) {
+            recipients.push(Recipient({
+                recipient: _recipients[i],
+                percent: _percents[i]
+            }));
             totalPercent += _percents[i];
         }
 
@@ -260,12 +267,13 @@ contract FightTokenVesting {
     }
 
     function release(uint which) external {
+        require(which < totalReleases, "No such a releases");
         require(!releasePoints[which].hasReleased, "Batch already released");
         require(block.timestamp >= releasePoints[which].time, "Current time is before release time");
 
         uint balance = fight.balanceOf(address(this));
         uint batchAmount = releasePoints[which].amount;
-        require(balance >= batchAmount, "TokenTimelock: no enougth tokens to release");
+        require(balance >= batchAmount, "No enougth tokens to release");
 
         for (uint i = 0; i < recipients.length; i++) {
             fight.safeTransfer(recipients[i].recipient, batchAmount * recipients[i].percent / divisionFactor);
