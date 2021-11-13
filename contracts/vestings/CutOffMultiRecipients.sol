@@ -231,6 +231,7 @@ contract FightTokenVesting {
     uint public divisionFactor = 1000;
 
     constructor(
+        address _fight,
         uint[] memory _times,
         uint[] memory _amounts,
         address[] memory _recipients,
@@ -251,7 +252,7 @@ contract FightTokenVesting {
         }
 
         require(totalPercent == divisionFactor, "Recipients does not add up to 100%");
-        fight = IERC20(0x12FC07081Fab7DE60987cAd8E8dc407B606FB2F8);
+        fight = IERC20(_fight);
     }
 
     receive () payable external {
