@@ -6,7 +6,7 @@ pragma solidity ^0.8.0;
  * @dev Interface of the ERC20 standard as defined in the EIP.
  */
 interface IERC20 {
-    
+
     function totalSupply() external view returns (uint256);
     function balanceOf(address account) external view returns (uint256);
     function transfer(address recipient, uint256 amount) external returns (bool);
@@ -417,23 +417,27 @@ abstract contract Ownable is Context {
 
 contract FightToken is ERC20, Ownable {
     uint public updatedAt;
-    uint public releasePerSecond;
-    
+    uint public immutable releasePerSecond;
+
     constructor() ERC20("Fight Token", "FIGHT") {
         _mint(owner(), 1000000000 * 10 ** 18);
         /* We have a fixed inflation without compounding effect
          * There are 60 * 60 * 24 * 365 = 31536000 seconds in a year
          * 10,000,000 FIGHT release each year, so 10000000 * 10 ^ 18 / 31536000 = 317097919837645900
          * basically 0.3170979198376459 FIGHT release per second
-        */ 
+        */
         releasePerSecond = 317097919837645900;
         updatedAt = block.timestamp;
     }
-    
+
+    receive () payable external {
+        revert();
+    }
+
     function burn(uint256 amount) external {
         _burn(_msgSender(), amount);
     }
-    
+
     function releasedReadyAmount() public view returns (uint) {
         return (block.timestamp - updatedAt) * releasePerSecond;
     }
@@ -442,7 +446,7 @@ contract FightToken is ERC20, Ownable {
         _mint(owner(), releasedReadyAmount());
         updatedAt = block.timestamp;
     }
-    
+
     function transferAnyStuckERC20Token(address tokenAddress, uint tokens) external onlyOwner {
         IERC20(tokenAddress).transfer(owner(), tokens);
     }
