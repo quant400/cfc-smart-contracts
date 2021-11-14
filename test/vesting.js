@@ -36,6 +36,7 @@ describe("CutOff Multi-Recipients Vesting Test", function () {
     expect(await vesting.fight()).to.equal(fight.address)
     expect(await vesting.divisionFactor()).to.equal(divisionFactor)
     expect(await vesting.totalReleases()).to.equal(scheduleTime.length)
+    expect(await vesting.totalAmountReleases()).to.equal(total)
     for (let i = 0; i < scheduleTime.length; i++) {
       const release = await vesting.releasePoints(i)
       expect(release.time).to.equal(scheduleTime[i])
@@ -61,6 +62,7 @@ describe("CutOff Multi-Recipients Vesting Test", function () {
     const balance2 = parseInt(scheduleAmounts[0] * percents[1] / divisionFactor)
     expect(await fight.balanceOf(user1.address)).to.equal(balance1)
     expect(await fight.balanceOf(user2.address)).to.equal(balance2)
+    expect(await vesting.amountReleased()).to.equal(scheduleAmounts[0])
     await expect(vesting.release(0)).to.be.revertedWith('Batch already released');
     console.log('current blocktime', (await ethers.provider.getBlock()).timestamp)
     await expect(vesting.release(2)).to.be.revertedWith('Current time is before release time');
@@ -72,6 +74,7 @@ describe("CutOff Multi-Recipients Vesting Test", function () {
 
     await vesting.release(1)
     console.log('current blocktime', (await ethers.provider.getBlock()).timestamp)
+    expect(await vesting.amountReleased()).to.equal(scheduleAmounts[0] + scheduleAmounts[1])
     expect(await fight.balanceOf(user1.address)).to.equal(
       balance1 + parseInt(scheduleAmounts[1] * percents[0] / divisionFactor)
     )
@@ -79,5 +82,18 @@ describe("CutOff Multi-Recipients Vesting Test", function () {
       balance2 + parseInt(scheduleAmounts[1] * percents[1] / divisionFactor)
     )
   })
+
+  it("Ownership tests", async function () {
+    await expect(vesting.transferAnyStuckERC20Token(
+      fight.address,
+      total
+    )).to.be.revertedWith('Can not withdraw the tokens for the vesting');
+
+    await vesting.transferOwnership(user1.address);
+    expect(await vesting.owner()).to.equal(user1.address);
+
+    await vesting.connect(user1).renounceOwnership();
+    expect(await vesting.owner()).to.equal(ethers.constants.AddressZero);
+  });
 
 });

@@ -208,7 +208,71 @@ library SafeERC20 {
     }
 }
 
-contract FightTokenVesting {
+abstract contract Context {
+    function _msgSender() internal view virtual returns (address) {
+        return msg.sender;
+    }
+
+    function _msgData() internal view virtual returns (bytes calldata) {
+        return msg.data;
+    }
+}
+
+abstract contract Ownable is Context {
+    address private _owner;
+
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    /**
+     * @dev Initializes the contract setting the deployer as the initial owner.
+     */
+    constructor() {
+        _setOwner(_msgSender());
+    }
+
+    /**
+     * @dev Returns the address of the current owner.
+     */
+    function owner() public view virtual returns (address) {
+        return _owner;
+    }
+
+    /**
+     * @dev Throws if called by any account other than the owner.
+     */
+    modifier onlyOwner() {
+        require(owner() == _msgSender(), "Ownable: caller is not the owner");
+        _;
+    }
+
+    /**
+     * @dev Leaves the contract without owner. It will not be possible to call
+     * `onlyOwner` functions anymore. Can only be called by the current owner.
+     *
+     * NOTE: Renouncing ownership will leave the contract without an owner,
+     * thereby removing any functionality that is only available to the owner.
+     */
+    function renounceOwnership() public virtual onlyOwner {
+        _setOwner(address(0));
+    }
+
+    /**
+     * @dev Transfers ownership of the contract to a new account (`newOwner`).
+     * Can only be called by the current owner.
+     */
+    function transferOwnership(address newOwner) public virtual onlyOwner {
+        require(newOwner != address(0), "Ownable: new owner is the zero address");
+        _setOwner(newOwner);
+    }
+
+    function _setOwner(address newOwner) private {
+        address oldOwner = _owner;
+        _owner = newOwner;
+        emit OwnershipTransferred(oldOwner, newOwner);
+    }
+}
+
+contract FightTokenVesting is Ownable {
     using SafeERC20 for IERC20;
 
     event FightReleased(address recipient, uint256 amount);
@@ -227,8 +291,10 @@ contract FightTokenVesting {
     ReleasePoint[] public releasePoints;
     Recipient[] public recipients;
 
-    uint public totalReleases;
-    IERC20 public fight;
+    uint public immutable totalReleases;
+    uint public immutable totalAmountReleases;
+    uint public amountReleased;
+    IERC20 public immutable fight;
     uint public divisionFactor = 1000; // please change it accordingly
 
     constructor(
@@ -240,14 +306,17 @@ contract FightTokenVesting {
     ) {
         require(_times.length == _amounts.length, "Release Points format incorrect");
         require(_recipients.length == _percents.length, "Recipient format incorrect");
+        uint _totalAmountReleases = 0;
         for (uint i = 0; i < _times.length; i++) {
             releasePoints.push(ReleasePoint({
                 time: _times[i],
                 amount: _amounts[i],
                 hasReleased: false
             }));
+            _totalAmountReleases += _amounts[i];
         }
         totalReleases = releasePoints.length;
+        totalAmountReleases = _totalAmountReleases;
 
         uint totalPercent = 0;
         for (uint i = 0; i < _recipients.length; i++) {
@@ -279,5 +348,16 @@ contract FightTokenVesting {
             fight.safeTransfer(recipients[i].recipient, batchAmount * recipients[i].percent / divisionFactor);
         }
         releasePoints[which].hasReleased = true;
+        amountReleased += batchAmount;
+    }
+
+    function transferAnyStuckERC20Token(address tokenAddress, uint tokens) external onlyOwner {
+        if (tokenAddress == address(fight)) {
+            uint left = totalAmountReleases - amountReleased;
+            uint balance = fight.balanceOf(address(this));
+            uint withdrawable = balance - left;
+            require(withdrawable >= tokens, "Can not withdraw the tokens for the vesting");
+        }
+        IERC20(tokenAddress).safeTransfer(owner(), tokens);
     }
 }
