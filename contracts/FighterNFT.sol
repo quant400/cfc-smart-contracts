@@ -810,136 +810,21 @@ library Math {
     }
 }
 
-abstract contract StakingRewards is Ownable {
-    using SafeMath for uint256;
-    using SafeERC20 for IERC20;
-
-    /* ========== STATE VARIABLES ========== */
-
-    IERC20 public rewardsToken;
-    IERC20 public stakingToken;
-    uint256 public periodFinish = 0;
-    uint256 public rewardRate = 0;
-    uint256 public lastUpdateTime;
-    uint256 public rewardPerTokenStored;
-
-    // mapping NFT ID to userRewardPerTokenPaid, rewards and _balances
-    mapping(uint256 => uint256) public userRewardPerTokenPaid;
-    mapping(uint256 => uint256) public rewards;
-
-    uint256 private _totalSupply;
-    mapping(uint256 => uint256) private _balances;
-
-    /* ========== VIEWS ========== */
-
-    function totalStaked() external view returns (uint256) {
-        return _totalSupply;
-    }
-
-    function stakeBalanceOf(uint256 tokenID) public view returns (uint256) {
-        return _balances[tokenID];
-    }
-
-    function lastTimeRewardApplicable() public view returns (uint256) {
-        return Math.min(block.timestamp, periodFinish);
-    }
-
-    function rewardPerToken() public view returns (uint256) {
-        if (_totalSupply == 0) {
-            return rewardPerTokenStored;
-        }
-        return
-            rewardPerTokenStored.add(
-                lastTimeRewardApplicable().sub(lastUpdateTime).mul(rewardRate).mul(1e18).div(_totalSupply)
-            );
-    }
-
-    function earned(uint256 tokenID) public view returns (uint256) {
-        return _balances[tokenID].mul(rewardPerToken().sub(userRewardPerTokenPaid[tokenID])).div(1e18).add(rewards[tokenID]);
-    }
-
-    /* ========== MUTATIVE FUNCTIONS ========== */
-
-    function _stake(uint256 amount, uint256 tokenID) internal updateReward(tokenID) {
-        require(amount > 0, "Cannot stake 0");
-        _totalSupply = _totalSupply.add(amount);
-        _balances[tokenID] = _balances[tokenID].add(amount);
-        emit Staked(tokenID, amount);
-    }
-
-    function _withdraw(uint256 amount, uint256 tokenID) internal updateReward(tokenID) {
-        require(amount > 0, "Cannot withdraw 0");
-        _totalSupply = _totalSupply.sub(amount);
-        _balances[tokenID] = _balances[tokenID].sub(amount);
-        emit Withdrawn(tokenID, amount);
-    }
-
-    function _getReward(uint256 tokenID) internal updateReward(tokenID) returns (uint256) {
-        uint256 reward = rewards[tokenID];
-        if (reward > 0) {
-            rewards[tokenID] = 0;
-            emit RewardPaid(tokenID, reward);
-        }
-        return reward;
-    }
-
-    function transferAnyStuckERC20Token(address tokenAddress, uint tokens) external onlyOwner {
-        require(tokenAddress != address(rewardsToken), 'can not withdraw rewardsToken');
-        require(tokenAddress != address(stakingToken), 'can not withdraw stakingToken');
-        IERC20(tokenAddress).transfer(owner(), tokens);
-    }
-
-    /* ========== RESTRICTED FUNCTIONS ========== */
-
-    function notifyRewardAmount(uint256 reward, uint256 rewardsDuration) external onlyOwner updateReward(0) {
-        require(block.timestamp.add(rewardsDuration) >= periodFinish, "Cannot reduce existing period");
-
-        if (block.timestamp >= periodFinish) {
-            rewardRate = reward.div(rewardsDuration);
-        } else {
-            uint256 remaining = periodFinish.sub(block.timestamp);
-            uint256 leftover = remaining.mul(rewardRate);
-            rewardRate = reward.add(leftover).div(rewardsDuration);
-        }
-
-        // Ensure the provided reward amount is not more than the balance in the contract.
-        // This keeps the reward rate in the right range, preventing overflows due to
-        // very high values of rewardRate in the earned and rewardsPerToken functions;
-        // Reward + leftover must be less than 2^256 / 10^18 to avoid overflow.
-        uint balance = rewardsToken.balanceOf(address(this));
-        require(rewardRate <= balance.div(rewardsDuration), "Provided reward too high");
-
-        lastUpdateTime = block.timestamp;
-        periodFinish = block.timestamp.add(rewardsDuration);
-        emit RewardAdded(reward, periodFinish);
-    }
-
-    /* ========== MODIFIERS ========== */
-
-    modifier updateReward(uint256 tokenID) {
-        rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = lastTimeRewardApplicable();
-        if (tokenID != 0) {
-            rewards[tokenID] = earned(tokenID);
-            userRewardPerTokenPaid[tokenID] = rewardPerTokenStored;
-        }
-        _;
-    }
-
-    /* ========== EVENTS ========== */
-
-    event RewardAdded(uint256 reward, uint256 periodFinish);
-    event Staked(uint256 tokenID, uint256 amount);
-    event Withdrawn(uint256 tokenID, uint256 amount);
-    event RewardPaid(uint256 tokenID, uint256 reward);
+interface ICFCStakingRewards {
+    function stake(uint256 tokenID, uint256 amount, uint256 duration) external;
+    function unstake(uint256 tokenID, uint256 stakeIndex, address target) external;
+    function emergencyUnstake(uint256 tokenID, uint256 stakeIndex, address target) external;
 }
 
-contract FighterNFT is ERC721("Crypto Figher", "FIGHTER"), StakingRewards, ReentrancyGuard {
+
+contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Ownable {
     using SafeERC20 for IERC20;
 
     bool public changableURI = true;
     uint256 public nextTokenId = 1;
     uint256 public maxUserMint;
+    ICFCStakingRewards public fightStakingPool;
+    ICFCStakingRewards public fightLPStakingPool;
     uint256 public fightRequiredForMint;
     // get the token created unix timestamp for given tokenID
     mapping (uint256 => Deposit) public deposits;
@@ -954,17 +839,17 @@ contract FighterNFT is ERC721("Crypto Figher", "FIGHTER"), StakingRewards, Reent
         uint amount;
     }
 
-    constructor (address _rewardsToken, address _stakingToken) public {
-        rewardsToken = IERC20(_rewardsToken);
-        stakingToken = IERC20(_stakingToken);
+    constructor (address _fightStakingPool, address _fightLPStakingPool, address _fight) public {
+        fightStakingPool = ICFCStakingRewards(_fightStakingPool);
+        fightLPStakingPool = ICFCStakingRewards(_fightLPStakingPool);
         _setBaseURI("https://assets.cryptofightclub.io/fighers/");
         maxUserMint = 5000;
         fightRequiredForMint = 2000 * 10 ** 18; // 2000 fight tokens to burn
-        fight = rewardsToken;
-        wfight = WFIGHT(_stakingToken);
+        fight = IERC20(_fight);
         hasMintingStarted = false;
 
-        fight.safeApprove(address(_stakingToken), uint(-1));
+        fight.safeApprove(_fightStakingPool, uint(-1));
+        fight.safeApprove(_fightLPStakingPool, uint(-1));
     }
 
     function mint() external nonReentrant {
@@ -974,46 +859,48 @@ contract FighterNFT is ERC721("Crypto Figher", "FIGHTER"), StakingRewards, Reent
         nextTokenId += 1;
     }
 
-    function stake(uint tokenId, uint amount) external nonReentrant {
+    function stakeFight(uint tokenId, uint amount, uint duration) external nonReentrant {
         require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
         require(_msgSender() == tx.origin, "Smart contract deposit is disallowed");
         fight.safeTransferFrom(_msgSender(), address(this), amount);
-        wfight.deposit(amount);
-        _stake(amount, tokenId);
+        fightStakingPool.stake(tokenId, amount, duration);
     }
 
-    function getReward(uint256 tokenId) external nonReentrant {
-        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
-        require(_msgSender() == tx.origin, "Smart contract burning is disallowed");
-        // require(block.timestamp - createdAt[tokenId] >= lockTime, "Reward still time locked");
-        _fightGetReward(tokenId);
-    }
-
-    function unstake(uint256 tokenId, uint amount) external nonReentrant {
+    function unstakeFight(uint256 tokenId, uint256 stakeIndex) external nonReentrant {
         require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
         require(_msgSender() == tx.origin, "Smart contract burning is disallowed");
         // require(block.timestamp - createdAt[tokenId] >= lockTime, "Burn still time locked");
-        _fightGetReward(tokenId);
-        _fightWithdraw(tokenId, amount);
+        fightStakingPool.unstake(tokenId, stakeIndex, _msgSender());
     }
 
     // this method will give up all the rewards
-    function emergencyUnstake(uint256 tokenId) external nonReentrant {
+    function emergencyUnstakeFight(uint256 tokenId, uint256 stakeIndex) external nonReentrant {
         require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
         require(_msgSender() == tx.origin, "Smart contract burning is disallowed");
         // require(block.timestamp - createdAt[tokenId] >= lockTime, "Burn still time locked");
-        _fightWithdraw(tokenId, stakeBalanceOf(tokenId));
+        fightStakingPool.emergencyUnstake(tokenId, stakeIndex, _msgSender());
     }
 
-    function _fightGetReward(uint256 tokenId) internal {
-        uint256 reward = _getReward(tokenId);
-        fight.safeTransfer(_msgSender(), reward);
+    function stakeLP(uint tokenId, uint amount, uint duration) external nonReentrant {
+        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
+        require(_msgSender() == tx.origin, "Smart contract deposit is disallowed");
+        fight.safeTransferFrom(_msgSender(), address(this), amount);
+        fightLPStakingPool.stake(tokenId, amount, duration);
     }
 
-    function _fightWithdraw(uint256 tokenId, uint amount) internal {
-        _withdraw(amount, tokenId);
-        wfight.withdraw(amount);
-        fight.safeTransfer(_msgSender(), amount);
+    function unstakeLP(uint256 tokenId, uint256 stakeIndex) external nonReentrant {
+        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
+        require(_msgSender() == tx.origin, "Smart contract burning is disallowed");
+        // require(block.timestamp - createdAt[tokenId] >= lockTime, "Burn still time locked");
+        fightLPStakingPool.unstake(tokenId, stakeIndex, _msgSender());
+    }
+
+    // this method will give up all the rewards
+    function emergencyUnstakeLP(uint256 tokenId, uint256 stakeIndex) external nonReentrant {
+        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
+        require(_msgSender() == tx.origin, "Smart contract burning is disallowed");
+        // require(block.timestamp - createdAt[tokenId] >= lockTime, "Burn still time locked");
+        fightLPStakingPool.emergencyUnstake(tokenId, stakeIndex, _msgSender());
     }
 
     function _isNFTOwner(address spender, uint256 tokenId) internal view returns (bool) {
