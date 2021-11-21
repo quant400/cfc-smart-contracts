@@ -814,6 +814,7 @@ interface ICFCStakingRewards {
     function stake(uint256 tokenID, uint256 amount, uint256 duration) external;
     function unstake(uint256 tokenID, uint256 stakeIndex, address target) external;
     function emergencyUnstake(uint256 tokenID, uint256 stakeIndex, address target) external;
+    function unstakeWithoutReward(uint256 tokenID, uint256 stakeIndex, address target) external;
 }
 
 
@@ -852,63 +853,61 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         fight.safeApprove(_fightLPStakingPool, uint(-1));
     }
 
-    function mint() external nonReentrant {
+    function mint() external noContract nonReentrant {
         require(nextTokenId <= maxUserMint, "User minting finished");
-        require(_msgSender() == tx.origin, "Smart contract minting is disallowed");
         _fightMint(_msgSender(), nextTokenId);
         nextTokenId += 1;
     }
 
-    function stakeFight(uint tokenId, uint amount, uint duration) external nonReentrant {
-        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
-        require(_msgSender() == tx.origin, "Smart contract deposit is disallowed");
+    function stakeFight(uint tokenId, uint amount, uint duration) external noContract nonReentrant isNFTOwner(tokenId) {
         fight.safeTransferFrom(_msgSender(), address(this), amount);
         fightStakingPool.stake(tokenId, amount, duration);
     }
 
-    function unstakeFight(uint256 tokenId, uint256 stakeIndex) external nonReentrant {
-        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
-        require(_msgSender() == tx.origin, "Smart contract burning is disallowed");
-        // require(block.timestamp - createdAt[tokenId] >= lockTime, "Burn still time locked");
+    function unstakeFight(uint256 tokenId, uint256 stakeIndex) external noContract nonReentrant isNFTOwner(tokenId) {
         fightStakingPool.unstake(tokenId, stakeIndex, _msgSender());
     }
 
     // this method will give up all the rewards
-    function emergencyUnstakeFight(uint256 tokenId, uint256 stakeIndex) external nonReentrant {
-        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
-        require(_msgSender() == tx.origin, "Smart contract burning is disallowed");
-        // require(block.timestamp - createdAt[tokenId] >= lockTime, "Burn still time locked");
+    function emergencyUnstakeFight(uint256 tokenId, uint256 stakeIndex) external noContract nonReentrant isNFTOwner(tokenId) {
         fightStakingPool.emergencyUnstake(tokenId, stakeIndex, _msgSender());
     }
 
-    function stakeLP(uint tokenId, uint amount, uint duration) external nonReentrant {
-        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
-        require(_msgSender() == tx.origin, "Smart contract deposit is disallowed");
+    function unstakeWithoutReward(uint256 tokenId, uint256 stakeIndex) external noContract nonReentrant isNFTOwner(tokenId) {
+        fightStakingPool.unstakeWithoutReward(tokenId, stakeIndex, _msgSender());
+    }
+
+    function stakeLP(uint tokenId, uint amount, uint duration) external noContract nonReentrant isNFTOwner(tokenId) {
         fight.safeTransferFrom(_msgSender(), address(this), amount);
         fightLPStakingPool.stake(tokenId, amount, duration);
     }
 
-    function unstakeLP(uint256 tokenId, uint256 stakeIndex) external nonReentrant {
-        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
-        require(_msgSender() == tx.origin, "Smart contract burning is disallowed");
-        // require(block.timestamp - createdAt[tokenId] >= lockTime, "Burn still time locked");
+    function unstakeLP(uint256 tokenId, uint256 stakeIndex) external noContract nonReentrant isNFTOwner(tokenId) {
         fightLPStakingPool.unstake(tokenId, stakeIndex, _msgSender());
     }
 
     // this method will give up all the rewards
-    function emergencyUnstakeLP(uint256 tokenId, uint256 stakeIndex) external nonReentrant {
-        require(_isNFTOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
-        require(_msgSender() == tx.origin, "Smart contract burning is disallowed");
-        // require(block.timestamp - createdAt[tokenId] >= lockTime, "Burn still time locked");
+    function emergencyUnstakeLP(uint256 tokenId, uint256 stakeIndex) external noContract nonReentrant isNFTOwner(tokenId) {
         fightLPStakingPool.emergencyUnstake(tokenId, stakeIndex, _msgSender());
     }
 
-    function _isNFTOwner(address spender, uint256 tokenId) internal view returns (bool) {
-        require(_exists(tokenId), "ERC721: operator query for nonexistent token");
-        address owner = ownerOf(tokenId);
-        return spender == owner;
+    function unstakeLPWithoutReward(uint256 tokenId, uint256 stakeIndex) external noContract nonReentrant isNFTOwner(tokenId) {
+        fightLPStakingPool.unstakeWithoutReward(tokenId, stakeIndex, _msgSender());
     }
 
+    /* ========== MODIFIERS ========== */
+    modifier noContract() {
+        require(_msgSender() == tx.origin, "Smart contract is not disallowed");
+        _;
+    }
+
+    modifier isNFTOwner(uint256 tokenId) {
+        require(_exists(tokenId), "ERC721: operator query for nonexistent token");
+        require(_msgSender() == ownerOf(tokenId), "ERC721Burnable: caller is not owner nor approved");
+        _;
+    }
+
+    /* ========== INTERNAL FUNCTIONS ========== */
     function _fightMint(address target, uint tokenId) internal {
         require(hasMintingStarted, "Minting has not yet started");
         fight.safeTransferFrom(_msgSender(), address(this), fightRequiredForMint);
@@ -916,7 +915,8 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         _safeMint(target, tokenId);
     }
 
-    // following methods only admin can access
+    /* ========== RESTRICTED FUNCTIONS ========== */
+
     function startMinting() external onlyOwner {
         require(!hasMintingStarted, "Minting already started");
         hasMintingStarted = true;

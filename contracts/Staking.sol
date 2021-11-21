@@ -5,6 +5,7 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
     function transfer(address recipient, uint256 amount) external returns (bool);
     function allowance(address owner, address spender) external view returns (uint256);
+    function burn(uint256 amount) external;
     function approve(address spender, uint256 amount) external returns (bool);
     function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
 
@@ -215,6 +216,8 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     uint256 public constant MAX_BIGGER_PAY_BETTER = 5 * 10 ** 18;
     uint256 public constant FULL_STAKE_LENGTH = 1820 days;
     uint256 public constant MULT_FACTOR = 10 ** 8;
+    uint256 public constant GRACE_PERIOD = 2 weeks;
+    uint256 public constant LATE_PENALTY = 143; // 0.143%, means need to divide by 100000
 
     struct StakeStore {
         uint256 stakeID;
@@ -265,7 +268,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
                 ).div(1e18).add(stakeLists[tokenID][stakeIndex].reward);
     }
 
-    function _stakeStartBonus(uint256 amount, uint256 duration) private pure returns (uint256) {
+    function bonusCalculator(uint256 amount, uint256 duration) public pure returns (uint256) {
         uint256 cappedExtraDays = 0;
 
         if (duration > 1 days) {
@@ -288,15 +291,25 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
         return stakeLists[tokenID][stakeIndex].createdAt.add(stakeLists[tokenID][stakeIndex].duration).add(MIN_STAKE_DURATION);
     }
 
+    function latePenaltyCalculator(uint256 reward, uint256 endTime) public view returns (uint256) {
+        uint256 lateTime = endTime.sub(block.timestamp);
+        if (lateTime > GRACE_PERIOD) {
+            uint256 penaltyDays = lateTime.sub(GRACE_PERIOD).div(1 days);
+            return penaltyDays.mul(LATE_PENALTY).div(100000).mul(reward);
+        } else {
+            return 0;
+        }
+    }
+
     /* ========== MUTATIVE FUNCTIONS ========== */
 
-    function stake(uint256 tokenID, uint256 amount, uint256 duration) external isNFTContract nonReentrant updateReward(tokenID, numOfStakes(tokenID)) {
+    function stake(uint256 tokenID, uint256 amount, uint256 duration) external isNFTContract nonReentrant updateReward(0, 0) {
         require(amount > 0, "Cannot stake 0");
         require(duration > MIN_STAKE_DURATION, "Stake less than min stake");
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
 
         totalStakes = totalStakes.add(amount);
-        uint shares = _stakeStartBonus(amount, duration);
+        uint shares = bonusCalculator(amount, duration);
         totalShares = totalShares.add(shares);
         stakeLists[tokenID].push(
             StakeStore({
@@ -304,7 +317,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
                 principle: amount,
                 shares: shares,
                 reward: 0,
-                userRewardPerSharePaid: 0,
+                userRewardPerSharePaid: rewardPerShareStored,
                 createdAt: block.timestamp,
                 duration: duration
             })
@@ -312,34 +325,55 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
         emit Staked(tokenID, amount);
     }
 
-    function unstake(uint256 tokenID, uint256 stakeIndex, address target) public isNFTContract nonReentrant updateReward(tokenID, stakeIndex) {
+    function unstake(uint256 tokenID, uint256 stakeIndex, address target) public isNFTContract nonReentrant {
         require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
         require(stakeEndTime(tokenID, stakeIndex) >= block.timestamp, "Still in lock");
-
-        uint256 amount = stakeLists[tokenID][stakeIndex].principle;
-        uint256 reward = stakeLists[tokenID][stakeIndex].reward;
-        uint256 shares = stakeLists[tokenID][stakeIndex].shares;
-        totalStakes = totalStakes.sub(amount);
-        totalShares = totalShares.sub(shares);
-        uint256 lastIndex = stakeLists[tokenID].length - 1;
-
-        if (stakeIndex != lastIndex) {
-            /* Copy last element to the requested element's "hole" */
-            stakeLists[tokenID][stakeIndex] = stakeLists[tokenID][lastIndex];
-        }
-
-        stakeLists[tokenID].pop();
-        stakingToken.safeTransfer(target, amount);
-        rewardsToken.safeTransfer(target, reward);
-
-        emit Withdrawn(target, tokenID, amount);
-        emit RewardPaid(target, tokenID, reward);
+        uint256 reward = _unstakePrinciple(tokenID, stakeIndex, target);
+        // apply late penalty if any
+        uint256 penalty = latePenaltyCalculator(reward, stakeEndTime(tokenID, stakeIndex));
+        uint256 finalReward = reward.sub(penalty);
+        rewardsToken.burn(penalty);
+        rewardsToken.safeTransfer(target, finalReward);
+        emit RewardPaid(target, tokenID, finalReward);
     }
 
-    function emergencyUnstake(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract {
-
+    function emergencyUnstake(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract nonReentrant updateReward(tokenID, stakeIndex) {
+      require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
+      require(stakeEndTime(tokenID, stakeIndex) < block.timestamp, "You can unstake noramlly");
+      uint256 reward = _unstakePrinciple(tokenID, stakeIndex, target);
+      uint256 afterPenalty = reward.div(2);
+      uint256 penalty = reward.sub(afterPenalty);
+      rewardsToken.burn(penalty);
+      rewardsToken.safeTransfer(target, afterPenalty);
+      emit RewardPaid(target, tokenID, afterPenalty);
     }
 
+    // this will give up all rewards and should only use for special purpose
+    function unstakeWithoutReward(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract nonReentrant updateReward(tokenID, stakeIndex) {
+        require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
+        require(stakeEndTime(tokenID, stakeIndex) >= block.timestamp, "Still in lock");
+        _unstakePrinciple(tokenID, stakeIndex, target);
+    }
+
+    /* ========== INTERNAL FUNCTIONS ========== */
+    function _unstakePrinciple(uint256 tokenID, uint256 stakeIndex, address target) internal returns (uint256 reward) {
+      require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
+      uint256 amount = stakeLists[tokenID][stakeIndex].principle;
+      reward = stakeLists[tokenID][stakeIndex].reward;
+      uint256 shares = stakeLists[tokenID][stakeIndex].shares;
+      totalStakes = totalStakes.sub(amount);
+      totalShares = totalShares.sub(shares);
+      uint256 lastIndex = stakeLists[tokenID].length - 1;
+
+      if (stakeIndex != lastIndex) {
+          /* Copy last element to the requested element's "hole" */
+          stakeLists[tokenID][stakeIndex] = stakeLists[tokenID][lastIndex];
+      }
+
+      stakeLists[tokenID].pop();
+      stakingToken.safeTransfer(target, amount);
+      emit Withdrawn(target, tokenID, amount);
+    }
     /* ========== RESTRICTED FUNCTIONS ========== */
 
     function notifyRewardAmount(uint256 reward, uint256 rewardsDuration) external onlyOwner updateReward(0, 0) {
