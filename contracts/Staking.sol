@@ -212,7 +212,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     uint256 public totalShares;
     uint256 public totalStakes;
     address public nft;
-    uint256 public constant MIN_STAKE_DURATION = 1 days;
+    uint256 public constant MIN_STAKE_DURATION = 10 seconds;
     uint256 public constant MAX_BIGGER_PAY_BETTER = 5 * 10 ** 18;
     uint256 public constant FULL_STAKE_LENGTH = 1820 days;
     uint256 public constant MULT_FACTOR = 10 ** 8;
@@ -223,7 +223,6 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
         uint256 stakeID;
         uint256 principle;
         uint256 shares;
-        uint256 reward;
         uint256 userRewardPerSharePaid;
         uint256 createdAt;
         uint256 duration;
@@ -265,7 +264,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     function earned(uint256 tokenID, uint256 stakeIndex) public view returns (uint256) {
         return stakeLists[tokenID][stakeIndex].shares.mul(
                     rewardPerShare().sub(stakeLists[tokenID][stakeIndex].userRewardPerSharePaid)
-                ).div(1e18).add(stakeLists[tokenID][stakeIndex].reward);
+                ).div(1e18);
     }
 
     function bonusCalculator(uint256 amount, uint256 duration) public pure returns (uint256) {
@@ -279,6 +278,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
             ? amount
             : MAX_BIGGER_PAY_BETTER;
 
+        // multiplication adjustment
         uint256 bonusPercents = cappedExtraDays / FULL_STAKE_LENGTH + cappedStakedFights / MAX_BIGGER_PAY_BETTER;
         return bonusPercents * amount;
     }
@@ -288,11 +288,11 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     }
 
     function stakeEndTime(uint256 tokenID, uint256 stakeIndex) public view returns (uint256) {
-        return stakeLists[tokenID][stakeIndex].createdAt.add(stakeLists[tokenID][stakeIndex].duration).add(MIN_STAKE_DURATION);
+        return stakeLists[tokenID][stakeIndex].createdAt.add(stakeLists[tokenID][stakeIndex].duration);
     }
 
     function latePenaltyCalculator(uint256 reward, uint256 endTime) public view returns (uint256) {
-        uint256 lateTime = endTime.sub(block.timestamp);
+        uint256 lateTime = block.timestamp.sub(endTime);
         if (lateTime > GRACE_PERIOD) {
             uint256 penaltyDays = lateTime.sub(GRACE_PERIOD).div(1 days);
             return penaltyDays.mul(LATE_PENALTY).div(100000).mul(reward);
@@ -305,7 +305,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
 
     function stake(uint256 tokenID, uint256 amount, uint256 duration) external isNFTContract nonReentrant updateReward(0, 0) {
         require(amount > 0, "Cannot stake 0");
-        require(duration > MIN_STAKE_DURATION, "Stake less than min stake");
+        require(duration >= MIN_STAKE_DURATION, "Stake duration less than mininum");
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
 
         totalStakes = totalStakes.add(amount);
@@ -316,7 +316,6 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
                 stakeID: numOfStakes(tokenID),
                 principle: amount,
                 shares: shares,
-                reward: 0,
                 userRewardPerSharePaid: rewardPerShareStored,
                 createdAt: block.timestamp,
                 duration: duration
@@ -325,41 +324,46 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
         emit Staked(tokenID, amount);
     }
 
-    function unstake(uint256 tokenID, uint256 stakeIndex, address target) public isNFTContract nonReentrant {
-        require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
-        require(stakeEndTime(tokenID, stakeIndex) >= block.timestamp, "Still in lock");
-        uint256 reward = _unstakePrinciple(tokenID, stakeIndex, target);
-        // apply late penalty if any
-        uint256 penalty = latePenaltyCalculator(reward, stakeEndTime(tokenID, stakeIndex));
-        uint256 finalReward = reward.sub(penalty);
-        rewardsToken.burn(penalty);
-        rewardsToken.safeTransfer(target, finalReward);
-        emit RewardPaid(target, tokenID, finalReward);
-    }
-
-    function emergencyUnstake(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract nonReentrant updateReward(tokenID, stakeIndex) {
-      require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
-      require(stakeEndTime(tokenID, stakeIndex) < block.timestamp, "You can unstake noramlly");
-      uint256 reward = _unstakePrinciple(tokenID, stakeIndex, target);
-      uint256 afterPenalty = reward.div(2);
-      uint256 penalty = reward.sub(afterPenalty);
-      rewardsToken.burn(penalty);
-      rewardsToken.safeTransfer(target, afterPenalty);
-      emit RewardPaid(target, tokenID, afterPenalty);
+    function unstake(uint256 tokenID, uint256 stakeIndex, address target) public isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward(tokenID, stakeIndex) {
+        require(stakeEndTime(tokenID, stakeIndex) <= block.timestamp, "Still in lock");
+        uint256 reward = earned(tokenID, stakeIndex);
+        _unstakePrinciple(tokenID, stakeIndex, target);
+        if (reward > 0) {
+            // apply late penalty if any
+            uint256 penalty = latePenaltyCalculator(reward, stakeEndTime(tokenID, stakeIndex));
+            uint256 finalReward = reward.sub(penalty);
+            rewardsToken.safeTransfer(target, finalReward);
+            if (penalty > 0) {
+                rewardsToken.burn(penalty);
+            }
+            emit RewardPaid(target, tokenID, finalReward);
+        }
     }
 
     // this will give up all rewards and should only use for special purpose
-    function unstakeWithoutReward(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract nonReentrant updateReward(tokenID, stakeIndex) {
-        require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
-        require(stakeEndTime(tokenID, stakeIndex) >= block.timestamp, "Still in lock");
+    function unstakeWithoutReward(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward(tokenID, stakeIndex) {
+        require(stakeEndTime(tokenID, stakeIndex) <= block.timestamp, "Still in lock");
         _unstakePrinciple(tokenID, stakeIndex, target);
     }
 
+    function emergencyUnstake(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward(tokenID, stakeIndex) {
+      require(stakeEndTime(tokenID, stakeIndex) > block.timestamp, "You can unstake noramlly");
+      uint256 reward = earned(tokenID, stakeIndex);
+      _unstakePrinciple(tokenID, stakeIndex, target);
+      if (reward > 0) {
+            uint256 afterPenalty = reward.div(2);
+            uint256 penalty = reward.sub(afterPenalty);
+            if (penalty > 0) {
+                rewardsToken.burn(penalty);
+            }
+            rewardsToken.safeTransfer(target, afterPenalty);
+            emit RewardPaid(target, tokenID, afterPenalty);
+      }
+    }
+
     /* ========== INTERNAL FUNCTIONS ========== */
-    function _unstakePrinciple(uint256 tokenID, uint256 stakeIndex, address target) internal returns (uint256 reward) {
-      require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
+    function _unstakePrinciple(uint256 tokenID, uint256 stakeIndex, address target) internal {
       uint256 amount = stakeLists[tokenID][stakeIndex].principle;
-      reward = stakeLists[tokenID][stakeIndex].reward;
       uint256 shares = stakeLists[tokenID][stakeIndex].shares;
       totalStakes = totalStakes.sub(amount);
       totalShares = totalShares.sub(shares);
@@ -406,14 +410,14 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     }
 
     /* ========== MODIFIERS ========== */
+    modifier validStakeIndex(uint256 tokenID, uint256 stakeIndex) {
+        require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
+        _;
+    }
 
     modifier updateReward(uint256 tokenID, uint256 stakeIndex) {
         rewardPerShareStored = rewardPerShare();
         lastUpdateTime = lastTimeRewardApplicable();
-        if (tokenID != 0) {
-            stakeLists[tokenID][stakeIndex].reward = earned(tokenID, stakeIndex);
-            stakeLists[tokenID][stakeIndex].userRewardPerSharePaid = rewardPerShareStored;
-        }
         _;
     }
 
