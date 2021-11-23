@@ -356,17 +356,16 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     function unstake(uint256 tokenID, uint256 stakeIndex, address target) public isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward {
         require(stakeEndTime(tokenID, stakeIndex) <= blockTime(), "Still in lock");
         uint256 reward = earned(tokenID, stakeIndex);
+        uint256 penalty = 0;
         if (reward > 0) {
             // apply late penalty if any
-            uint256 penalty = latePenaltyCalculator(reward, stakeEndTime(tokenID, stakeIndex));
+            penalty = latePenaltyCalculator(reward, stakeEndTime(tokenID, stakeIndex));
             uint256 finalReward = reward.sub(penalty);
             rewardsToken.safeTransfer(target, finalReward);
-            if (penalty > 0) {
-                rewardsToken.burn(penalty);
-            }
             emit RewardPaid(target, tokenID, finalReward);
         }
         _unstakePrinciple(tokenID, stakeIndex, target);
+        _handlePenalty(penalty);
     }
 
     // this will give up all rewards and should only use for special purpose
@@ -376,19 +375,18 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     }
 
     function emergencyUnstake(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward {
-      require(stakeEndTime(tokenID, stakeIndex) > blockTime(), "You can unstake noramlly");
-      uint256 reward = earned(tokenID, stakeIndex);
-      if (reward > 0) {
+        require(stakeEndTime(tokenID, stakeIndex) > blockTime(), "You can unstake noramlly");
+        uint256 reward = earned(tokenID, stakeIndex);
+        uint256 penalty = 0;
+        if (reward > 0) {
             // if reward is less than 2 (0.000000000000000002 FIGHT), there is no penalty
             uint256 afterPenalty = reward.div(2);
-            uint256 penalty = reward.sub(afterPenalty);
-            if (penalty > 0) {
-                rewardsToken.burn(penalty);
-            }
+            penalty = reward.sub(afterPenalty);
             rewardsToken.safeTransfer(target, afterPenalty);
             emit RewardPaid(target, tokenID, afterPenalty);
       }
-      _unstakePrinciple(tokenID, stakeIndex, target);
+        _unstakePrinciple(tokenID, stakeIndex, target);
+        _handlePenalty(penalty);
     }
 
     /* ========== INTERNAL FUNCTIONS ========== */
@@ -410,6 +408,22 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
       stakingToken.withdraw(amount);
       rewardsToken.safeTransfer(target, amount);
       emit Withdrawn(target, tokenID, amount);
+    }
+
+    function _handlePenalty(uint256 penalty) internal {
+      if (penalty > 0) {
+        if(totalShares != 0) {
+          _redistributeReward(penalty);
+        } else { // last staker penalty burn
+          rewardsToken.burn(penalty);
+        }
+      }
+    }
+
+    function _redistributeReward(uint256 amount) internal {
+      rewardPerShareStored = rewardPerShareStored.add(
+              amount.mul(1e18).div(totalShares)
+          );
     }
     /* ========== RESTRICTED FUNCTIONS ========== */
 
@@ -442,6 +456,11 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
         nft = _nft;
     }
 
+    function bigPayDay(uint256 amount) external onlyOwner updateReward {
+      require(totalShares > 0, "no users");
+      rewardsToken.safeTransferFrom(msg.sender, address(this), amount);
+      _redistributeReward(amount);
+    }
     /* ========== MODIFIERS ========== */
     modifier validStakeIndex(uint256 tokenID, uint256 stakeIndex) {
         require(numOfStakes(tokenID) > stakeIndex, "StakeID does not exist");
