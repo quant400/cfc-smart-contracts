@@ -197,6 +197,11 @@ contract ReentrancyGuard {
     }
 }
 
+interface WTOKEN is IERC20 {
+    function deposit(uint256 amount) external;
+    function withdraw(uint256 amount) external;
+}
+
 contract CFCStakingRewards is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -204,7 +209,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     /* ========== STATE VARIABLES ========== */
 
     IERC20 public rewardsToken;
-    IERC20 public stakingToken;
+    WTOKEN public stakingToken;
     uint256 public periodFinish = 0;
     uint256 public rewardRate = 0;
     uint256 public lastUpdateTime;
@@ -212,10 +217,9 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     uint256 public totalShares;
     uint256 public totalStakes;
     address public nft;
-    uint256 public constant MIN_STAKE_DURATION = 0 seconds;
-    uint256 public constant MAX_BIGGER_PAY_BETTER = 5 * 10 ** 18;
-    uint256 public constant FULL_STAKE_LENGTH = 1820 days;
-    uint256 public constant MULT_FACTOR = 10 ** 8;
+    uint256 public constant MIN_STAKE_DURATION = 1 minutes;
+    uint256 public constant MAX_BIGGER_PAY_BETTER = 5 * 1e24; // 5 millions FIGHTs
+    uint256 public constant FULL_STAKE_LENGTH = 1820 minutes;
     uint256 public constant GRACE_PERIOD = 1 minutes;
     uint256 public constant LATE_PENALTY = 143; // 0.143%, means need to divide by 100000
 
@@ -232,13 +236,15 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
 
     /* ========== CONSTRUCTOR ========== */
 
+    // assuming the staking token is a wToken
     constructor(
         address _rewardsToken,
         address _stakingToken
     ) public {
         rewardsToken = IERC20(_rewardsToken);
-        stakingToken = IERC20(_stakingToken);
+        stakingToken = WTOKEN(_stakingToken);
         nft = msg.sender;
+        rewardsToken.safeApprove(_stakingToken, uint256(-1));
     }
 
     /* ========== VIEWS ========== */
@@ -247,8 +253,12 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
         _;
     }
 
+    function blockTime() public view returns (uint256) {
+        return block.timestamp;
+    }
+
     function lastTimeRewardApplicable() public view returns (uint256) {
-        return Math.min(block.timestamp, periodFinish);
+        return Math.min(blockTime(), periodFinish);
     }
 
     function rewardPerShare() public view returns (uint256) {
@@ -267,20 +277,29 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
                 ).div(1e18);
     }
 
-    function bonusCalculator(uint256 amount, uint256 duration) public pure returns (uint256) {
-        uint256 cappedExtraDays = 0;
-
-        if (duration > 1 minutes) {
-            cappedExtraDays = duration <= FULL_STAKE_LENGTH ? duration.sub(1 minutes) : FULL_STAKE_LENGTH;
+    function longerBonus(uint256 amount, uint256 duration) public pure returns (uint256) {
+        uint256 benchmarkTime = 1 minutes;
+        uint256 bonus = 0;
+        if (duration > benchmarkTime) {
+            uint256 cappedExtraTime = duration <= FULL_STAKE_LENGTH ? duration.sub(benchmarkTime) : FULL_STAKE_LENGTH;
+            // if stake amount or extra duration is too tiny, this bonus could be 0
+            bonus = amount.mul(cappedExtraTime).div(FULL_STAKE_LENGTH);
         }
+        return bonus;
+    }
 
-        uint256 cappedStakedFights = amount <= MAX_BIGGER_PAY_BETTER
-            ? amount
-            : MAX_BIGGER_PAY_BETTER;
+    function biggerBonus(uint256 amount) public pure returns (uint256) {
+        uint256 cappedStakedFights = amount <= MAX_BIGGER_PAY_BETTER ? amount: MAX_BIGGER_PAY_BETTER;
+        // if this amount is less than 3000000000000 (0.000003 FIGHT), this bonus could be 0
+        return amount.mul(cappedStakedFights).div(MAX_BIGGER_PAY_BETTER);
+    }
 
-        // multiplication adjustment
-        uint256 bonusPercents = cappedExtraDays / FULL_STAKE_LENGTH + cappedStakedFights / MAX_BIGGER_PAY_BETTER;
-        return bonusPercents * amount;
+    function bonusCalculator(uint256 amount, uint256 duration) public pure returns (uint256) {
+        return longerBonus(amount, duration).add(biggerBonus(amount));
+    }
+
+    function shareCalculator(uint256 amount, uint256 duration) public pure returns (uint256) {
+        return bonusCalculator(amount, duration).add(amount);
     }
 
     function numOfStakes(uint256 tokenID) public view returns (uint256) {
@@ -292,7 +311,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     }
 
     function latePenaltyCalculator(uint256 reward, uint256 endTime) public view returns (uint256) {
-        uint256 lateTime = block.timestamp.sub(endTime);
+        uint256 lateTime = blockTime().sub(endTime);
         if (lateTime > GRACE_PERIOD) {
             uint256 penaltyDays = lateTime.sub(GRACE_PERIOD).div(1 minutes);
             // if reward is smaller than 1000 (0.000000000000001 FIGHT), penalty will always be 0
@@ -313,10 +332,13 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     function stake(uint256 tokenID, uint256 amount, uint256 duration) external isNFTContract nonReentrant updateReward {
         require(amount > 0, "Cannot stake 0");
         require(duration >= MIN_STAKE_DURATION, "Stake duration less than mininum");
-        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        // get fight first
+        rewardsToken.safeTransferFrom(msg.sender, address(this), amount);
+        // convert fight to wfight
+        stakingToken.deposit(amount);
 
         totalStakes = totalStakes.add(amount);
-        uint shares = bonusCalculator(amount, duration);
+        uint shares = shareCalculator(amount, duration);
         totalShares = totalShares.add(shares);
         stakeLists[tokenID].push(
             StakeStore({
@@ -324,7 +346,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
                 principle: amount,
                 shares: shares,
                 userRewardPerSharePaid: rewardPerShareStored,
-                createdAt: block.timestamp,
+                createdAt: blockTime(),
                 duration: duration
             })
         );
@@ -332,7 +354,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     }
 
     function unstake(uint256 tokenID, uint256 stakeIndex, address target) public isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward {
-        require(stakeEndTime(tokenID, stakeIndex) <= block.timestamp, "Still in lock");
+        require(stakeEndTime(tokenID, stakeIndex) <= blockTime(), "Still in lock");
         uint256 reward = earned(tokenID, stakeIndex);
         if (reward > 0) {
             // apply late penalty if any
@@ -349,12 +371,12 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
 
     // this will give up all rewards and should only use for special purpose
     function unstakeWithoutReward(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward {
-        require(stakeEndTime(tokenID, stakeIndex) <= block.timestamp, "Still in lock");
+        require(stakeEndTime(tokenID, stakeIndex) <= blockTime(), "Still in lock");
         _unstakePrinciple(tokenID, stakeIndex, target);
     }
 
     function emergencyUnstake(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward {
-      require(stakeEndTime(tokenID, stakeIndex) > block.timestamp, "You can unstake noramlly");
+      require(stakeEndTime(tokenID, stakeIndex) > blockTime(), "You can unstake noramlly");
       uint256 reward = earned(tokenID, stakeIndex);
       if (reward > 0) {
             // if reward is less than 2 (0.000000000000000002 FIGHT), there is no penalty
@@ -383,18 +405,21 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
       }
 
       stakeLists[tokenID].pop();
-      stakingToken.safeTransfer(target, amount);
+
+      // unwrap
+      stakingToken.withdraw(amount);
+      rewardsToken.safeTransfer(target, amount);
       emit Withdrawn(target, tokenID, amount);
     }
     /* ========== RESTRICTED FUNCTIONS ========== */
 
     function notifyRewardAmount(uint256 reward, uint256 rewardsDuration) external onlyOwner updateReward() {
-        require(block.timestamp.add(rewardsDuration) >= periodFinish, "Cannot reduce existing period");
+        require(blockTime().add(rewardsDuration) >= periodFinish, "Cannot reduce existing period");
 
-        if (block.timestamp >= periodFinish) {
+        if (blockTime() >= periodFinish) {
             rewardRate = reward.div(rewardsDuration);
         } else {
-            uint256 remaining = periodFinish.sub(block.timestamp);
+            uint256 remaining = periodFinish.sub(blockTime());
             uint256 leftover = remaining.mul(rewardRate);
             rewardRate = reward.add(leftover).div(rewardsDuration);
         }
@@ -406,14 +431,14 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
         uint balance = rewardsToken.balanceOf(address(this));
         require(rewardRate <= balance.div(rewardsDuration), "Provided reward too high");
 
-        lastUpdateTime = block.timestamp;
-        periodFinish = block.timestamp.add(rewardsDuration);
+        lastUpdateTime = blockTime();
+        periodFinish = blockTime().add(rewardsDuration);
         emit RewardAdded(reward, periodFinish);
     }
 
     // onlyOwner modifier is not necessary but still there to ensure it only run once
     function setNFTContract(address _nft) external onlyOwner {
-        require(_nft == msg.sender, 'Only run this once');
+        require(nft == msg.sender, 'Only run this once');
         nft = _nft;
     }
 

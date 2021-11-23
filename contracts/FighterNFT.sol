@@ -830,9 +830,8 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
     // get the token created unix timestamp for given tokenID
     mapping (uint256 => Deposit) public deposits;
     bool public hasMintingStarted;
-    uint256 public lockTime = 2 seconds;
     IERC20 public fight;
-    WFIGHT public wfight;
+    IERC20 public lp;
 
     struct Deposit {
         uint depositAt;
@@ -840,17 +839,18 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         uint amount;
     }
 
-    constructor (address _fightStakingPool, address _fightLPStakingPool, address _fight) public {
+    constructor (address _fightStakingPool, address _fightLPStakingPool, address _fight, address _lp) public {
         fightStakingPool = ICFCStakingRewards(_fightStakingPool);
         fightLPStakingPool = ICFCStakingRewards(_fightLPStakingPool);
         _setBaseURI("https://assets.cryptofightclub.io/fighers/");
         maxUserMint = 5000;
         fightRequiredForMint = 2000 * 10 ** 18; // 2000 fight tokens to burn
         fight = IERC20(_fight);
+        lp = IERC20(_lp);
         hasMintingStarted = false;
 
         fight.safeApprove(_fightStakingPool, uint(-1));
-        fight.safeApprove(_fightLPStakingPool, uint(-1));
+        lp.safeApprove(_fightLPStakingPool, uint(-1));
     }
 
     function mint() external noContract nonReentrant {
@@ -878,7 +878,7 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
     }
 
     function stakeLP(uint tokenId, uint amount, uint duration) external noContract nonReentrant isNFTOwner(tokenId) {
-        fight.safeTransferFrom(_msgSender(), address(this), amount);
+        lp.safeTransferFrom(_msgSender(), address(this), amount);
         fightLPStakingPool.stake(tokenId, amount, duration);
     }
 
