@@ -822,11 +822,12 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
     using SafeERC20 for IERC20;
 
     bool public changableURI = true;
-    uint256 public nextTokenId = 1;
+    uint256 public nextTokenId;
     uint256 public maxUserMint;
     ICFCStakingRewards public fightStakingPool;
     ICFCStakingRewards public fightLPStakingPool;
     uint256 public fightRequiredForMint;
+    uint256 public teamAllocation;
     // get the token created unix timestamp for given tokenID
     mapping (uint256 => Deposit) public deposits;
     bool public hasMintingStarted;
@@ -839,7 +840,7 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         uint amount;
     }
 
-    constructor (address _fightStakingPool, address _fightLPStakingPool, address _fight, address _lp) public {
+    constructor (address _fightStakingPool, address _fightLPStakingPool, address _fight, address _lp, uint256 _teamAllocation) public {
         fightStakingPool = ICFCStakingRewards(_fightStakingPool);
         fightLPStakingPool = ICFCStakingRewards(_fightLPStakingPool);
         _setBaseURI("https://assets.cryptofightclub.io/fighers/");
@@ -848,6 +849,8 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         fight = IERC20(_fight);
         lp = IERC20(_lp);
         hasMintingStarted = false;
+        teamAllocation = _teamAllocation;
+        nextTokenId = _teamAllocation.add(1);
 
         fight.safeApprove(_fightStakingPool, uint(-1));
         lp.safeApprove(_fightLPStakingPool, uint(-1));
@@ -922,7 +925,15 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         hasMintingStarted = true;
     }
 
-    /*
+    // this can only be called once
+    // after first run, it will return tokenID already exist error
+    function teamClaim() external onlyOwner {
+        for (uint256 i = 1; i <= teamAllocation; i++) {
+          _safeMint(owner(), i);
+        }
+    }
+
+     /*
      * admin can mint without the limitation of maxUserMint
      * however still required to pay the fight fee from current or previous batch
     */
