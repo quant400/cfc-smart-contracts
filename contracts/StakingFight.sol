@@ -277,7 +277,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
                 ).div(1e18);
     }
 
-    function longerBonus(uint256 amount, uint256 duration) public pure returns (uint256) {
+    function bonusCalculator(uint256 amount, uint256 duration) public pure returns (uint256) {
         uint256 benchmarkTime = 1 minutes;
         uint256 bonus = 0;
         if (duration > benchmarkTime) {
@@ -286,16 +286,6 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
             bonus = amount.mul(cappedExtraTime).div(FULL_STAKE_LENGTH);
         }
         return bonus;
-    }
-
-    function biggerBonus(uint256 amount) public pure returns (uint256) {
-        uint256 cappedStakedFights = amount <= MAX_BIGGER_PAY_BETTER ? amount: MAX_BIGGER_PAY_BETTER;
-        // if this amount is less than 3000000000000 (0.000003 FIGHT), this bonus could be 0
-        return amount.mul(cappedStakedFights).div(MAX_BIGGER_PAY_BETTER);
-    }
-
-    function bonusCalculator(uint256 amount, uint256 duration) public pure returns (uint256) {
-        return longerBonus(amount, duration).add(biggerBonus(amount));
     }
 
     function shareCalculator(uint256 amount, uint256 duration) public pure returns (uint256) {

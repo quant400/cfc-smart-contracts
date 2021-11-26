@@ -855,8 +855,7 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
 
     function mint() external noContract nonReentrant {
         require(nextTokenId <= maxUserMint, "User minting finished");
-        _fightMint(_msgSender(), nextTokenId);
-        nextTokenId += 1;
+        _fightMint(_msgSender());
     }
 
     function stakeFight(uint tokenId, uint amount, uint duration) external noContract nonReentrant isNFTOwner(tokenId) {
@@ -908,11 +907,12 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
     }
 
     /* ========== INTERNAL FUNCTIONS ========== */
-    function _fightMint(address target, uint tokenId) internal {
+    function _fightMint(address target) internal {
         require(hasMintingStarted, "Minting has not yet started");
         fight.safeTransferFrom(_msgSender(), address(this), fightRequiredForMint);
         fight.burn(fightRequiredForMint);
-        _safeMint(target, tokenId);
+        _safeMint(target, nextTokenId);
+        nextTokenId += 1;
     }
 
     /* ========== RESTRICTED FUNCTIONS ========== */
@@ -922,9 +922,19 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         hasMintingStarted = true;
     }
 
-    function adminMint(address target, uint tokenId) external onlyOwner {
-        require(tokenId != 0, "minting ID 0 is not allowed");
-        _fightMint(target, tokenId);
+    /*
+     * admin can mint without the limitation of maxUserMint
+     * however still required to pay the fight fee from current or previous batch
+    */
+    function adminMint(address target) external onlyOwner {
+        _fightMint(target);
+    }
+
+    function pushNewBatch(uint256 batchSize, uint256 newFightAmountRequired) external onlyOwner {
+      require(batchSize > 0, "Invalid batch size");
+      require(nextTokenId > maxUserMint, "Previous batch has not yet ended");
+      maxUserMint = nextTokenId.sub(1).add(batchSize);
+      fightRequiredForMint = newFightAmountRequired;
     }
 
     function setTokenURI(uint256 tokenId, string memory _tokenURI) public onlyOwner {
