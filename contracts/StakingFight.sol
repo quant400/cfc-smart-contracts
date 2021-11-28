@@ -218,7 +218,6 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
     uint256 public totalStakes;
     address public nft;
     uint256 public constant MIN_STAKE_DURATION = 1 minutes;
-    uint256 public constant MAX_BIGGER_PAY_BETTER = 5 * 1e24; // 5 millions FIGHTs
     uint256 public constant FULL_STAKE_LENGTH = 1820 minutes;
     uint256 public constant GRACE_PERIOD = 1 minutes;
     uint256 public constant LATE_PENALTY = 143; // 0.143%, means need to divide by 100000
