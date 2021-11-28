@@ -827,7 +827,8 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
     ICFCStakingRewards public fightStakingPool;
     ICFCStakingRewards public fightLPStakingPool;
     uint256 public fightRequiredForMint;
-    uint256 public teamAllocation;
+    uint256 public testNFTStartID;
+    uint256 public testNFTCount;
     // get the token created unix timestamp for given tokenID
     mapping (uint256 => Deposit) public deposits;
     bool public hasMintingStarted;
@@ -840,17 +841,18 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         uint amount;
     }
 
-    constructor (address _fightStakingPool, address _fightLPStakingPool, address _fight, address _lp, uint256 _teamAllocation) public {
+    constructor (address _fightStakingPool, address _fightLPStakingPool, address _fight, address _lp, uint256 _testNFTCount) public {
         fightStakingPool = ICFCStakingRewards(_fightStakingPool);
         fightLPStakingPool = ICFCStakingRewards(_fightLPStakingPool);
-        _setBaseURI("https://assets.cryptofightclub.io/fighers/");
-        maxUserMint = 5000;
+        _setBaseURI("https://assets.cryptofightclub.io/fighters/");
+        maxUserMint = 2;
         fightRequiredForMint = 2000 * 10 ** 18; // 2000 fight tokens to burn
         fight = IERC20(_fight);
         lp = IERC20(_lp);
         hasMintingStarted = false;
-        teamAllocation = _teamAllocation;
-        nextTokenId = _teamAllocation.add(1);
+        testNFTCount = _testNFTCount;
+        testNFTStartID = maxUserMint.add(1);
+        nextTokenId = 1;
 
         fight.safeApprove(_fightStakingPool, uint(-1));
         lp.safeApprove(_fightLPStakingPool, uint(-1));
@@ -926,10 +928,12 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
     }
 
     // this can only be called once
-    // after first run, it will return tokenID already exist error
-    function teamClaim() external onlyOwner {
-        for (uint256 i = 1; i <= teamAllocation; i++) {
-          _safeMint(owner(), i);
+    function testNFTClaim() external onlyOwner {
+        require(nextTokenId >= testNFTStartID, "User minting not yet finished");
+        require(testNFTStartID.add(testNFTCount) > nextTokenId, "testNFT has claimed");
+        for (uint256 i = 0; i < testNFTCount; i++) {
+          _safeMint(owner(), nextTokenId);
+          nextTokenId += 1;
         }
     }
 
@@ -944,6 +948,7 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
     function pushNewBatch(uint256 batchSize, uint256 newFightAmountRequired) external onlyOwner {
       require(batchSize > 0, "Invalid batch size");
       require(nextTokenId > maxUserMint, "Previous batch has not yet ended");
+      require(testNFTStartID.add(testNFTCount) <= nextTokenId, "Test NFT has not yet claim");
       maxUserMint = nextTokenId.sub(1).add(batchSize);
       fightRequiredForMint = newFightAmountRequired;
     }
