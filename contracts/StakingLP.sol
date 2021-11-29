@@ -212,9 +212,9 @@ contract CFCStakingRewardsLP is Ownable, ReentrancyGuard {
     uint256 public totalShares;
     uint256 public totalStakes;
     address public nft;
-    uint256 public constant MIN_STAKE_DURATION = 1 minutes;
-    uint256 public constant FULL_STAKE_LENGTH = 1820 minutes;
-    uint256 public constant GRACE_PERIOD = 1 minutes;
+    uint256 public constant MIN_STAKE_DURATION = 1 days;
+    uint256 public constant FULL_STAKE_LENGTH = 1820 days;
+    uint256 public constant GRACE_PERIOD = 2 weeks;
     uint256 public constant LATE_PENALTY = 143; // 0.143%, means need to divide by 100000
 
     struct StakeStore {
@@ -270,7 +270,7 @@ contract CFCStakingRewardsLP is Ownable, ReentrancyGuard {
     }
 
     function bonusCalculator(uint256 amount, uint256 duration) public pure returns (uint256) {
-        uint256 benchmarkTime = 1 minutes;
+        uint256 benchmarkTime = 1 days;
         uint256 bonus = 0;
         if (duration > benchmarkTime) {
             uint256 cappedExtraTime = duration <= FULL_STAKE_LENGTH ? duration.sub(benchmarkTime) : FULL_STAKE_LENGTH;
@@ -295,7 +295,7 @@ contract CFCStakingRewardsLP is Ownable, ReentrancyGuard {
     function latePenaltyCalculator(uint256 reward, uint256 endTime) public view returns (uint256) {
         uint256 lateTime = blockTime().sub(endTime);
         if (lateTime > GRACE_PERIOD) {
-            uint256 penaltyDays = lateTime.sub(GRACE_PERIOD).div(1 minutes);
+            uint256 penaltyDays = lateTime.sub(GRACE_PERIOD).div(1 days);
             // if reward is smaller than 1000 (0.000000000000001 FIGHT), penalty will always be 0
             uint256 penalty = reward.mul(penaltyDays).mul(LATE_PENALTY).div(100000);
             return Math.min(reward, penalty);
