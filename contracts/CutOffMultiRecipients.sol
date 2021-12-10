@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: MIT
 // Crypto Fight Club
 // Cut-off Style Multiple Beneficiaries Vesting Contract
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.9;
 
 interface IERC20 {
 
@@ -295,7 +296,7 @@ contract FightTokenVesting is Ownable {
     uint public immutable totalAmountReleases;
     uint public amountReleased;
     IERC20 public immutable fight;
-    uint public divisionFactor = 1000; // please change it accordingly
+    uint public immutable divisionFactor = 1000; // please change it accordingly
 
     constructor(
         address _fight,

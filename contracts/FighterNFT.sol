@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: MIT
 // Crypto Fight Club
 
-pragma solidity 0.6.2;
+pragma solidity 0.6.12;
 
 contract Context {
     constructor () internal { }
@@ -845,7 +846,7 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         fightStakingPool = ICFCStakingRewards(_fightStakingPool);
         fightLPStakingPool = ICFCStakingRewards(_fightLPStakingPool);
         _setBaseURI("https://assets.cryptofightclub.io/fighters/");
-        maxUserMint = 2;
+        maxUserMint = 5000;
         fightRequiredForMint = 2000 * 10 ** 18; // 2000 fight tokens to burn
         fight = IERC20(_fight);
         lp = IERC20(_lp);
@@ -901,7 +902,7 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
 
     /* ========== MODIFIERS ========== */
     modifier noContract() {
-        require(_msgSender() == tx.origin, "Smart contract is not disallowed");
+        require(_msgSender() == tx.origin, "Smart contract is not allowed");
         _;
     }
 
@@ -953,7 +954,7 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
       fightRequiredForMint = newFightAmountRequired;
     }
 
-    function setTokenURI(uint256 tokenId, string memory _tokenURI) public onlyOwner {
+    function setTokenURI(uint256 tokenId, string memory _tokenURI) external onlyOwner {
         require(changableURI, "URI is no longer changable");
         _setTokenURI(tokenId, _tokenURI);
     }
@@ -963,7 +964,7 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
         changableURI = false;
     }
 
-    function setBaseURI(string memory baseURI_) public onlyOwner {
+    function setBaseURI(string memory baseURI_) external onlyOwner {
         require(changableURI, "URI is no longer changable");
         _setBaseURI(baseURI_);
     }

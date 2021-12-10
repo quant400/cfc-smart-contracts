@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: MIT
 // Crypto Fight Club
 
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.9;
 
 /**
  * @dev Interface of the ERC20 standard as defined in the EIP.

@@ -1,4 +1,7 @@
-pragma solidity 0.6.2;
+// SPDX-License-Identifier: MIT
+// Crypto Fight Club
+
+pragma solidity 0.6.12;
 
 interface IERC20 {
     function totalSupply() external view returns (uint256);
@@ -342,7 +345,7 @@ contract CFCStakingRewards is Ownable, ReentrancyGuard {
         emit Staked(tokenID, amount);
     }
 
-    function unstake(uint256 tokenID, uint256 stakeIndex, address target) public isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward {
+    function unstake(uint256 tokenID, uint256 stakeIndex, address target) external isNFTContract validStakeIndex(tokenID, stakeIndex) nonReentrant updateReward {
         require(stakeEndTime(tokenID, stakeIndex) <= blockTime(), "Still in lock");
         uint256 reward = earned(tokenID, stakeIndex);
         uint256 penalty = 0;
