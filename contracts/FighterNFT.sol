@@ -836,6 +836,8 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
     IERC20 public fight;
     IERC20 public lp;
 
+    event NewBatch(uint256 newBatchSize, uint256 newMaxUserMint, uint256 newFightRequiredForMint);
+
     struct Deposit {
         uint depositAt;
         uint duration;
@@ -952,6 +954,7 @@ contract FighterNFT is ERC721("Crypto Fighter", "FIGHTER"), ReentrancyGuard, Own
       require(testNFTStartID.add(testNFTCount) <= nextTokenId, "Test NFT has not yet claim");
       maxUserMint = nextTokenId.sub(1).add(batchSize);
       fightRequiredForMint = newFightAmountRequired;
+      emit NewBatch(batchSize, maxUserMint, fightRequiredForMint);
     }
 
     function setTokenURI(uint256 tokenId, string memory _tokenURI) external onlyOwner {

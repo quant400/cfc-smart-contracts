@@ -4,6 +4,18 @@ Fight Token has a 10 millions (1% of the initial supply) inflation rate per year
 
 For vesting contract, we will use the cut-off multi-recipients vesting contract in production.
 
-Fighter smart contract is a work in process.
+### Test
+
+Please run tests separately as our smart contracts are time-dependent
+
+```
+npx hardhat test test/vesting.js
+```
+
+and
+
+```
+npx hardhat test test/staking.js
+```
 
 CFC Tech Team
