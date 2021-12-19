@@ -3,7 +3,7 @@ const { ethers } = require("hardhat");
 
 const now = Math.round(Date.now() / 1000) // to seconds rather than miliseconds
 const divisionFactor = 1000;
-const scheduleTime = [now + 2, now + 6, now + 10]
+const scheduleTime = [now + 2, now + 6, now + 1000000]
 console.log('Scheduled Time', scheduleTime)
 const scheduleAmounts = [1000000, 2000000, 5000000]
 const total = scheduleAmounts.reduce((a, b) => a + b, 0)

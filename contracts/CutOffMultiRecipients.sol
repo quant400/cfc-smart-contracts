@@ -296,7 +296,7 @@ contract FightTokenVesting is Ownable {
     uint public immutable totalAmountReleases;
     uint public amountReleased;
     IERC20 public immutable fight;
-    uint public immutable divisionFactor = 1000; // please change it accordingly
+    uint public constant divisionFactor = 1000; // please change it accordingly
 
     constructor(
         address _fight,
